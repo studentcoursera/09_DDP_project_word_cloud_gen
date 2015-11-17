@@ -1,12 +1,16 @@
+#install.packages("networkD3")
+
+library(shiny)
 library(tm)
 library(wordcloud)
 library(memoise)
+library(networkD3)
 
 #options(shiny.maxRequestSize = 30*1024^2) #30MB; shiny default is 5MB.
 #options(shiny.maxRequestSize = -1) #Large files
 options(shiny.maxRequestSize = 0.5*1024^2) #1MB; shiny default is 5MB.
 
-function(input, output, session) {
+shinyServer(function(input, output, session) {
     
     # Using "memoise" to automatically cache the results
     getTermMatrix <- memoise(function(txtfile) {
@@ -17,7 +21,7 @@ function(input, output, session) {
         words = tm_map(words, removePunctuation)
         words = tm_map(words, removeNumbers)
         words = tm_map(words, removeWords,
-                          c(stopwords("SMART"), "man", "men"))
+                       c(stopwords("SMART"), "man", "men"))
         
         termsMatrix = TermDocumentMatrix(words, control = list(minWordLength = 1))
         
@@ -50,7 +54,7 @@ function(input, output, session) {
         wordcloud_rep(names(v), v, scale=c(4,0.5),
                       min.freq = input$min_freq, max.words = input$max_wrds,
                       rot.per = input$rot,
-                      colors=brewer.pal(8, "Dark2"))
+                      colors = brewer.pal(8, "Dark2"))
     }
     
     output$plot <- renderPlot({
@@ -70,14 +74,14 @@ function(input, output, session) {
         filename <- function() { paste(input$txtfile, "wordcloud", ".png", sep="") },
         content = function(filename) {
             file.copy(image_word_cloud(), filename)
-    })
-
+        })
+    
     output$freq_csv <- downloadHandler(
         #filename = "freq.csv",
         filename <- function() { paste(input$txtfile, "freq", ".csv", sep="") },
         content = function(filename) {
             write.csv(terms(), filename)
-    })
+        })
     
     output$csvtable <- renderTable({
         if(length(t(terms())) < 7) max <- length(t(terms()))
@@ -86,4 +90,17 @@ function(input, output, session) {
         colnames(words) <- "freq"
         t(words)
     })
-}
+    
+    output$force <- renderForceNetwork({
+        # This is for network graph.
+        # As this needs to be in data frame format, etc., 
+        # it should be called this way.
+        data(MisLinks)
+        data(MisNodes)
+
+        forceNetwork(Links = MisLinks, Nodes = MisNodes,
+                     Source = "source", Target = "target",
+                     Value = "value", NodeID = "name",
+                     Group = "group", opacity = 0.5)
+    })
+})
