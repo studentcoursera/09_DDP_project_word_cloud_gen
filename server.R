@@ -1,26 +1,35 @@
-#install.packages("networkD3")
-
 library(shiny)
 library(tm)
 library(wordcloud)
 library(memoise)
 library(networkD3)
+library(rCharts)
 
 #options(shiny.maxRequestSize = 30*1024^2) #30MB; shiny default is 5MB.
 #options(shiny.maxRequestSize = -1) #Large files
-options(shiny.maxRequestSize = 0.5*1024^2) #1MB; shiny default is 5MB.
+options(shiny.maxRequestSize = 0.25*1024^2) #0.5MB; shiny default is 5MB.
+
+# This is for network graph.
+# As this needs to be in data frame format, etc., 
+# it should be called this way.
+data(MisLinks)
+data(MisNodes)
 
 shinyServer(function(input, output, session) {
     
     # Using "memoise" to automatically cache the results
-    getTermMatrix <- memoise(function(txtfile) {
-        text <- readLines(txtfile, encoding="UTF-8")
-        
-        words = Corpus(VectorSource(text))
-        words = tm_map(words, content_transformer(tolower))
-        words = tm_map(words, removePunctuation)
-        words = tm_map(words, removeNumbers)
-        words = tm_map(words, removeWords,
+    getTermMatrix <- memoise(function(txt) {
+        #text <- readLines(txtfile, encoding="UTF-8")
+
+        toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+                
+        words <- Corpus(VectorSource(txt))
+        words <- tm_map(words, content_transformer(tolower))
+        #inspect(words)
+        words <- tm_map(words, toSpace, "[[:punct:]]+")
+        #words <- tm_map(words, removePunctuation)
+        words <- tm_map(words, removeNumbers)
+        words <- tm_map(words, removeWords,
                        c(stopwords("SMART"), "man", "men"))
         
         termsMatrix = TermDocumentMatrix(words, control = list(minWordLength = 1))
@@ -37,13 +46,15 @@ shinyServer(function(input, output, session) {
         withProgress({
             if (is.null(infile)) {
                 setProgress(message = "Processing dummy file's corpus...")
-                getTermMatrix("./data/dummy.txt")
+                text <- readRDS("./data/dummy.rds")
             }
             else {
                 setProgress(message = "Processing uploaded file's corpus...")
-                getTermMatrix(infile$datapath)   
+                text <- readLines(infile$datapath, encoding="UTF-8")
             }
+            getTermMatrix(text)
         })
+        
     })
     
     # Make the wordcloud drawing predictable during a session
@@ -53,7 +64,7 @@ shinyServer(function(input, output, session) {
         v <- terms()
         wordcloud_rep(names(v), v, scale=c(4,0.5),
                       min.freq = input$min_freq, max.words = input$max_wrds,
-                      rot.per = input$rot,
+                      rot.per = input$rot, random.order = F,
                       colors = brewer.pal(8, "Dark2"))
     }
     
@@ -67,6 +78,24 @@ shinyServer(function(input, output, session) {
         dev.off()
         filename <- "wordcloud.png"
     }
+    
+    output$analysis <- renderChart2({
+        words <- data.frame(freq=terms())
+        #words <- data.frame(freq=getTermMatrix("data/dummy.txt"))
+        word_list <- data.frame(wrds=row.names(words), freq=words$freq)
+        t1 <- cbind(word_list[grep("[a-e]",substring(word_list$wrds, 1, 1)),],grp=1)
+        t1 <- rbind(t1, cbind(word_list[grep("[f-j]",substring(word_list$wrds, 1, 1)),],grp=2))
+        t1 <- rbind(t1, cbind(word_list[grep("[k-o]",substring(word_list$wrds, 1, 1)),],grp=3))
+        t1 <- rbind(t1, cbind(word_list[grep("[p-t]",substring(word_list$wrds, 1, 1)),],grp=4))
+        t1 <- rbind(t1, cbind(word_list[grep("[u-z]",substring(word_list$wrds, 1, 1)),],grp=5))
+        
+        sorted_t1 <- t1[order(t1$freq, decreasing = TRUE),]
+        n1 <- nPlot(freq ~ grp, group = 'wrds', type = 'multiBarChart', data = sorted_t1[1:7,])
+        n1$set(width = 500)
+        return(n1)
+        #n1$print('chart')
+        #n1$show("inline", include_assets = TRUE, cdn = F)
+    })
     
     # Download handler for the image.
     output$wordcloud_img <- downloadHandler(
@@ -92,15 +121,10 @@ shinyServer(function(input, output, session) {
     })
     
     output$force <- renderForceNetwork({
-        # This is for network graph.
-        # As this needs to be in data frame format, etc., 
-        # it should be called this way.
-        data(MisLinks)
-        data(MisNodes)
-
         forceNetwork(Links = MisLinks, Nodes = MisNodes,
                      Source = "source", Target = "target",
                      Value = "value", NodeID = "name",
-                     Group = "group", opacity = 0.5)
+                     Group = "group", opacity = input$opacity)
     })
+
 })
